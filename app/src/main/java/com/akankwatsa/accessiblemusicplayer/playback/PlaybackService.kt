@@ -194,8 +194,8 @@ class PlaybackService : MediaSessionService() {
         session = null
         player = null
         runCatching {
-            currentPlayer?.let { currentSession?.player?.release() }
             currentSession?.release()
+            currentPlayer?.release()
         }
         PlaybackController.reset()
         super.onDestroy()

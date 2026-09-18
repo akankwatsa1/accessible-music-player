@@ -69,7 +69,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(resumeTick) {
                     val granted = hasMediaPermission()
                     viewModel.refreshPermissionState(granted)
-                    if (granted) viewModel.rescan()
+                    if (granted) viewModel.rescanIfStale()
                 }
 
                 LaunchedEffect(pendingMediaUri) {

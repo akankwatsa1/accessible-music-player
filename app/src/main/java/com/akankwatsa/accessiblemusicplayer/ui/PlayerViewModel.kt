@@ -58,6 +58,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val _hasPermission = MutableStateFlow(false)
     val hasPermission: StateFlow<Boolean> = _hasPermission.asStateFlow()
 
+    private var _lastScanAt = 0L
+
     private val _snackbar = MutableStateFlow<String?>(null)
     val snackbar: StateFlow<String?> = _snackbar.asStateFlow()
 
@@ -114,15 +116,32 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Rescans the device library. Safe to call repeatedly. */
     fun rescan(announce: Boolean = false) {
+        if (_scanning.value) return
         viewModelScope.launch {
             _scanning.value = true
             val tracks = library.scanAll()
             _allTracks.value = tracks
+            _lastScanAt = System.currentTimeMillis()
             _scanning.value = false
             if (announce) {
-                _snackbar.value = "Library updated: ${tracks.size} items"
+                _snackbar.value = "Library updated: " + tracks.size + " items"
             }
         }
+    }
+
+    /**
+     * A MediaStore scan is fast but not free, so returning to the app only
+     * rescans when the library is empty or the last scan is stale. Files added
+     * while the app was away still show up, without a scan on every resume.
+     */
+    fun rescanIfStale() {
+        if (_scanning.value) return
+        if (_allTracks.value.isEmpty()) {
+            rescan()
+            return
+        }
+        val age = System.currentTimeMillis() - _lastScanAt
+        if (age > STALE_SCAN_MS) rescan()
     }
 
     fun setSearchQuery(query: String) {
@@ -282,5 +301,6 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     private companion object {
         const val SKIP_MS = 10_000L
+        const val STALE_SCAN_MS = 30_000L
     }
 }
