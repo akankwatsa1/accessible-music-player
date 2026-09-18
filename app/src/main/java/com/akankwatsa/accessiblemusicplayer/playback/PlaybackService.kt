@@ -165,7 +165,7 @@ class PlaybackService : MediaSessionService() {
                     Player.REPEAT_MODE_ONE -> PlayerSettings.REPEAT_ONE
                     else -> PlayerSettings.REPEAT_OFF
                 },
-                speed = p.playbackSpeed,
+                speed = p.playbackParameters.speed,
             )
         )
     }

@@ -34,8 +34,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Videocam
 
-import androidx.compose.material.icons.automirrored.filled.SkipNext
-import androidx.compose.material.icons.automirrored.filled.SkipPrevious
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 
@@ -490,7 +490,7 @@ private fun TransportBar(
                     )
                 }
                 TransportIconButton(
-                    icon = Icons.AutoMirrored.Filled.SkipPrevious,
+                    icon = Icons.Filled.SkipPrevious,
                     description = "Previous track",
                     enabled = playback.hasPrevious,
                     onClick = onPrevious,
@@ -499,7 +499,7 @@ private fun TransportBar(
                 PlayPauseButton(isPlaying = playback.isPlaying, onClick = onPlayPause)
                 SkipButton(isForward = true, onClick = onSkipForward)
                 TransportIconButton(
-                    icon = Icons.AutoMirrored.Filled.SkipNext,
+                    icon = Icons.Filled.SkipNext,
                     description = "Next track",
                     enabled = playback.hasNext,
                     onClick = onNext,
@@ -614,8 +614,8 @@ private fun SkipButton(isForward: Boolean, onClick: () -> Unit) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
-                imageVector = if (isForward) Icons.AutoMirrored.Filled.SkipNext
-                else Icons.AutoMirrored.Filled.SkipPrevious,
+                imageVector = if (isForward) Icons.Filled.SkipNext
+                else Icons.Filled.SkipPrevious,
                 contentDescription = null,
                 modifier = Modifier.size(26.dp),
                 tint = MaterialTheme.colorScheme.onSurface,
