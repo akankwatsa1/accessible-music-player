@@ -28,10 +28,8 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
-import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Videocam
@@ -59,6 +57,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -76,7 +75,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
@@ -115,14 +113,14 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    val uiState by viewModel.uiState.collectAsStateWithLifecycleCompat()
-    val tracks by viewModel.visibleTracks.collectAsStateWithLifecycleCompat()
-    val playback by viewModel.playback.collectAsStateWithLifecycleCompat()
-    val settings by viewModel.settings.collectAsStateWithLifecycleCompat()
-    val query by viewModel.searchQuery.collectAsStateWithLifecycleCompat()
-    val filter by viewModel.filter.collectAsStateWithLifecycleCompat()
-    val scanning by viewModel.scanning.collectAsStateWithLifecycleCompat()
-    val snackbar by viewModel.snackbar.collectAsStateWithLifecycleCompat()
+    val uiState by viewModel.uiState.collectAsComposeState()
+    val tracks by viewModel.visibleTracks.collectAsComposeState()
+    val playback by viewModel.playback.collectAsComposeState()
+    val settings by viewModel.settings.collectAsComposeState()
+    val query by viewModel.searchQuery.collectAsComposeState()
+    val filter by viewModel.filter.collectAsComposeState()
+    val scanning by viewModel.scanning.collectAsComposeState()
+    val snackbar by viewModel.snackbar.collectAsComposeState()
 
     var searchOpen by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -260,10 +258,9 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
     }
 }
 
-/** Reads a StateFlow as Compose state, without the lifecycle artefact. */
 /** Reads a StateFlow as Compose state. */
 @Composable
-private fun <T> kotlinx.coroutines.flow.StateFlow<T>.collectAsStateWithLifecycleCompat(): androidx.compose.runtime.State<T> =
+private fun <T> kotlinx.coroutines.flow.StateFlow<T>.collectAsComposeState(): androidx.compose.runtime.State<T> =
     this.collectAsState()
 
 /* ---------------------------------------------------------------- top bar */
@@ -612,18 +609,24 @@ private fun SkipButton(isForward: Boolean, onClick: () -> Unit) {
             .size(48.dp)
             .clip(RoundedCornerShape(24.dp))
             .pointerInput(Unit) { detectTapGestures { onClick() } }
-            .semantics {
-                contentDescription = description
-                role = Role.Button
-            },
+            .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = if (isForward) Icons.Filled.Forward10 else Icons.Filled.Replay10,
-            contentDescription = null,
-            modifier = Modifier.size(32.dp),
-            tint = MaterialTheme.colorScheme.onSurface,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                imageVector = if (isForward) Icons.AutoMirrored.Filled.SkipNext
+                else Icons.AutoMirrored.Filled.SkipPrevious,
+                contentDescription = null,
+                modifier = Modifier.size(26.dp),
+                tint = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "10",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
     }
 }
 
@@ -701,7 +704,6 @@ private fun TrackRow(
             .semantics(mergeDescendants = true) {
                 contentDescription = spoken
                 selected = isPlaying
-                role = Role.Button
                 customActions = listOf(
                     CustomAccessibilityAction(
                         if (isFavourite) "Remove from favourites" else "Add to favourites"
