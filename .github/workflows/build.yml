@@ -39,6 +39,14 @@ jobs:
       - name: Build debug and release APKs
         run: gradle assembleDebug assembleRelease --no-daemon --stacktrace
 
+      - name: Verify the release APK signature
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "Using build tools: $BT"
+          APK=app/build/outputs/apk/release/app-release.apk
+          "$BT/apksigner" verify --verbose --print-certs "$APK"
+          "$BT/aapt" dump badging "$APK" | head -20
+
       - name: Rename APKs
         run: |
           mkdir -p artifacts
