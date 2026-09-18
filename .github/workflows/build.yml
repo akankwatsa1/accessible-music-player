@@ -1,0 +1,68 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Generate debug signing keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore app/debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10950 \
+            -dname "CN=Accessible Music Player, OU=Mobile, O=akankwatsa1, L=Kampala, C=UG"
+
+      - name: Build debug and release APKs
+        run: gradle assembleDebug assembleRelease --no-daemon --stacktrace
+
+      - name: Rename APKs
+        run: |
+          mkdir -p artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             artifacts/AccessibleMusicPlayer-debug.apk
+          cp app/build/outputs/apk/release/app-release.apk \
+             artifacts/AccessibleMusicPlayer-release.apk
+          ls -lh artifacts
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: accessible-music-player-apk
+          path: artifacts/*.apk
+
+      - name: Publish a Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Accessible Music Player 1.0.${{ github.run_number }}
+          body: |
+            Accessible Music Player for Android.
+
+            Download `AccessibleMusicPlayer-release.apk` below and open it on your
+            phone to install. Android will ask you to allow installs from this
+            source the first time.
+          files: artifacts/*.apk
