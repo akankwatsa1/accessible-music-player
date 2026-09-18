@@ -67,6 +67,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.ProgressBarRangeInfo
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -76,6 +77,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -559,6 +561,11 @@ private fun SeekRow(
                     .fillMaxWidth()
                     .semantics {
                         contentDescription = "Playback position"
+                        progressBarRangeInfo = ProgressBarRangeInfo(
+                            current = positionMs.toFloat(),
+                            range = 0f..max,
+                            steps = 0,
+                        )
                         customActions = listOf(
                             CustomAccessibilityAction("Skip back 10 seconds") {
                                 onSeek((positionMs - 10_000L).coerceAtLeast(0L)); true
