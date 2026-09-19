@@ -35,7 +35,7 @@ sealed interface PlayerUiState {
 }
 
 /** Which slice of the library the list shows. */
-enum class LibraryFilter { ALL, FAVOURITES, VIDEOS }
+enum class LibraryFilter { ALL, FAVOURITES, VIDEOS, ALBUMS, ARTISTS }
 
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -55,6 +55,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val _filter = MutableStateFlow(LibraryFilter.ALL)
     val filter: StateFlow<LibraryFilter> = _filter.asStateFlow()
 
+    /** Album and artist narrowing, applied on top of the filter mode. */
+    private val _selectedAlbum = MutableStateFlow("")
+    val selectedAlbum: StateFlow<String> = _selectedAlbum.asStateFlow()
+
+    private val _selectedArtist = MutableStateFlow("")
+    val selectedArtist: StateFlow<String> = _selectedArtist.asStateFlow()
+
     private val _hasPermission = MutableStateFlow(false)
     val hasPermission: StateFlow<Boolean> = _hasPermission.asStateFlow()
 
@@ -69,10 +76,16 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     val playback = PlaybackController.state
 
     /** The filtered list actually rendered by the screen. */
-    val visibleTracks: StateFlow<List<MediaTrack>> =
-        combine(_allTracks, _searchQuery, _filter, settingsRepo.settings) { tracks, query, filterMode, prefs ->
-            filterTracks(tracks, query, filterMode, prefs.favourites)
-        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val visibleTracks: StateFlow<List<MediaTrack>> = combine(
+        _allTracks,
+        _searchQuery,
+        _filter,
+        _selectedAlbum,
+        _selectedArtist,
+        settingsRepo.settings,
+    ) { all, query, mode, album, artist, prefs ->
+        filterTracks(all, query, mode, album, artist, prefs.favourites)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val uiState: StateFlow<PlayerUiState> =
         combine(_hasPermission, _scanning, _allTracks) { permission, scanning, tracks ->
@@ -88,6 +101,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         tracks: List<MediaTrack>,
         query: String,
         filterMode: LibraryFilter,
+        album: String,
+        artist: String,
         favourites: Set<String>,
     ): List<MediaTrack> {
         val trimmed = query.trim()
@@ -96,6 +111,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 LibraryFilter.ALL -> true
                 LibraryFilter.FAVOURITES -> favourites.contains(track.stableKey)
                 LibraryFilter.VIDEOS -> track.isVideo
+                LibraryFilter.ALBUMS ->
+                    album.isBlank() || track.album.equals(album, ignoreCase = true)
+                LibraryFilter.ARTISTS ->
+                    artist.isBlank() || track.artist.equals(artist, ignoreCase = true)
             }
             if (!matchesFilter) return@filter false
             if (trimmed.isEmpty()) return@filter true
@@ -104,6 +123,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 track.album.contains(trimmed, ignoreCase = true)
         }
     }
+
+    /** Distinct album names, for the album picker. */
+    fun albumNames(): List<String> =
+        _allTracks.value.map { it.album }.filter { it.isNotBlank() }.distinct().sorted()
+
+    /** Distinct artist names, for the artist picker. */
+    fun artistNames(): List<String> =
+        _allTracks.value.map { it.artist }.filter { it.isNotBlank() }.distinct().sorted()
 
     fun onPermissionResult(granted: Boolean) {
         _hasPermission.value = granted
@@ -154,6 +181,29 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setFilter(filterMode: LibraryFilter) {
         _filter.value = filterMode
+    }
+
+    /** Picks the album to show. Passing a blank name shows every album. */
+    fun selectAlbum(album: String) {
+        _selectedAlbum.value = album
+        _filter.value = LibraryFilter.ALBUMS
+    }
+
+    /** Picks the artist to show. Passing a blank name shows every artist. */
+    fun selectArtist(artist: String) {
+        _selectedArtist.value = artist
+        _filter.value = LibraryFilter.ARTISTS
+    }
+
+    /**
+     * Removes a track from the library list. The media file itself is left
+     * alone: deleting a song from the device is a job for the gallery or file
+     * manager, and this app never destroys the listener's files.
+     */
+    fun forgetTrack(track: MediaTrack) {
+        val remaining = _allTracks.value.filterNot { it.stableKey == track.stableKey }
+        _allTracks.value = remaining
+        _snackbar.value = track.title + " removed from the list"
     }
 
     fun toggleFavourite(track: MediaTrack) {

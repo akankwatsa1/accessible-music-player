@@ -16,10 +16,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -37,6 +41,7 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -67,14 +72,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -111,7 +119,6 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(viewModel: PlayerViewModel) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -121,6 +128,8 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
     val settings by viewModel.settings.collectAsComposeState()
     val query by viewModel.searchQuery.collectAsComposeState()
     val filter by viewModel.filter.collectAsComposeState()
+    val selectedAlbum by viewModel.selectedAlbum.collectAsComposeState()
+    val selectedArtist by viewModel.selectedArtist.collectAsComposeState()
     val scanning by viewModel.scanning.collectAsComposeState()
     val snackbar by viewModel.snackbar.collectAsComposeState()
 
@@ -128,6 +137,8 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
     var menuOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var helpOpen by remember { mutableStateOf(false) }
+    var picker by remember { mutableStateOf<PickerKind?>(null) }
+    var pendingDelete by remember { mutableStateOf<MediaTrack?>(null) }
 
     // Surface service messages (for example a playback error) as a snackbar.
     DisposableEffect(Unit) {
@@ -146,17 +157,33 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        // In full-screen mode the bar disappears entirely so the list and the
+        // video get the whole screen.
         topBar = {
-            TopBar(
-                detailsExpanded = settings.detailsExpanded,
-                onToggleDetails = { viewModel.setDetailsExpanded(!settings.detailsExpanded) },
-                onToggleSearch = {
-                    searchOpen = !searchOpen
-                    if (!searchOpen) viewModel.clearSearch()
-                },
-                searchOpen = searchOpen,
-                onOpenMenu = { menuOpen = true },
-            )
+            if (searchOpen) {
+                TopBar(
+                    detailsExpanded = settings.detailsExpanded,
+                    onToggleDetails = { },
+                    onToggleSearch = {
+                        searchOpen = false
+                        viewModel.clearSearch()
+                    },
+                    searchOpen = true,
+                    query = query,
+                    onQueryChange = viewModel::setSearchQuery,
+                    onOpenMenu = { },
+                )
+            } else if (settings.detailsExpanded) {
+                TopBar(
+                    detailsExpanded = true,
+                    onToggleDetails = { viewModel.setDetailsExpanded(false) },
+                    onToggleSearch = { searchOpen = true },
+                    searchOpen = false,
+                    query = query,
+                    onQueryChange = viewModel::setSearchQuery,
+                    onOpenMenu = { menuOpen = true },
+                )
+            }
         },
         bottomBar = {
             TransportBar(
@@ -172,60 +199,77 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
             )
         },
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            if (settings.detailsExpanded || searchOpen) {
-                DetailHeader(
-                    query = query,
-                    onQueryChange = viewModel::setSearchQuery,
-                    searchOpen = searchOpen,
-                    onCloseSearch = {
-                        searchOpen = false
-                        viewModel.clearSearch()
-                    },
-                    filter = filter,
-                    onFilterChange = viewModel::setFilter,
-                    trackCount = tracks.size,
-                    scanning = scanning,
-                    favouritesOnly = settings.favouritesOnly,
-                )
-            }
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (settings.detailsExpanded) {
+                    DetailHeader(
+                        filter = filter,
+                        album = selectedAlbum,
+                        artist = selectedArtist,
+                        onFilterChange = { mode ->
+                            when (mode) {
+                                LibraryFilter.ALBUMS -> picker = PickerKind.ALBUM
+                                LibraryFilter.ARTISTS -> picker = PickerKind.ARTIST
+                                else -> viewModel.setFilter(mode)
+                            }
+                        },
+                        trackCount = tracks.size,
+                        scanning = scanning,
+                    )
+                }
 
-            if (playback.isVideo) {
-                VideoSurface(
-                    zoomFill = settings.zoomFill,
-                    onToggleZoom = { viewModel.setZoomFill(!settings.zoomFill) },
-                )
-            }
+                if (playback.isVideo) {
+                    VideoSurface(
+                        zoomFill = settings.zoomFill,
+                        onToggleZoom = { viewModel.setZoomFill(!settings.zoomFill) },
+                    )
+                }
 
-            // Body: permission prompt, scan progress, empty state, or the list.
-            when (uiState) {
-                PlayerUiState.NeedsPermission -> PermissionRequest(
-                    onGrant = { viewModel.onPermissionResult(true) },
-                    onOpenSettings = { viewModel.showMessage("Enable media access in app settings") },
-                )
+                // Body: permission prompt, scan progress, empty state, or the list.
+                when (uiState) {
+                    PlayerUiState.NeedsPermission -> PermissionRequest(
+                        onGrant = { viewModel.onPermissionResult(true) },
+                        onOpenSettings = {
+                            viewModel.showMessage("Enable media access in app settings")
+                        },
+                    )
 
-                PlayerUiState.Loading -> LoadingState()
-                PlayerUiState.Empty -> EmptyState(
-                    onRescan = { viewModel.rescan(announce = true) }
-                )
+                    PlayerUiState.Loading -> LoadingState()
+                    PlayerUiState.Empty -> EmptyState(
+                        onRescan = { viewModel.rescan(announce = true) }
+                    )
 
-                PlayerUiState.Ready -> {
-                    if (tracks.isEmpty()) {
-                        NoResultsState()
-                    } else {
-                        TrackList(
-                            tracks = tracks,
-                            playingKey = playback.mediaKey,
-                            favourites = settings.favourites,
-                            onPlay = viewModel::play,
-                            onToggleFavourite = viewModel::toggleFavourite,
-                        )
+                    PlayerUiState.Ready -> {
+                        if (tracks.isEmpty()) {
+                            NoResultsState()
+                        } else {
+                            TrackList(
+                                tracks = tracks,
+                                playingKey = playback.mediaKey,
+                                favourites = settings.favourites,
+                                onPlay = viewModel::play,
+                                onToggleFavourite = viewModel::toggleFavourite,
+                                onDelete = { pendingDelete = it },
+                            )
+                        }
                     }
                 }
+            }
+
+            // A single always-available control for getting back the full UI.
+            if (!settings.detailsExpanded) {
+                SmallFloatingButton(
+                    icon = Icons.Filled.KeyboardArrowDown,
+                    description = "Show controls",
+                    onClick = { viewModel.setDetailsExpanded(true) },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp),
+                )
             }
         }
     }
@@ -258,6 +302,115 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
             onDismiss = { helpOpen = false },
         )
     }
+
+    picker?.let { kind ->
+        val names = when (kind) {
+            PickerKind.ALBUM -> viewModel.albumNames()
+            PickerKind.ARTIST -> viewModel.artistNames()
+        }
+        SelectionSheet(
+            title = if (kind == PickerKind.ALBUM) "Choose an album" else "Choose an artist",
+            options = names,
+            allLabel = if (kind == PickerKind.ALBUM) "All albums" else "All artists",
+            onSelect = { value ->
+                if (kind == PickerKind.ALBUM) viewModel.selectAlbum(value)
+                else viewModel.selectArtist(value)
+                picker = null
+            },
+            onDismiss = { picker = null },
+        )
+    }
+
+    pendingDelete?.let { track ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Remove from the list?") },
+            text = {
+                Text(
+                    track.title +
+                        " will be removed from this app's list. The file itself is not " +
+                        "deleted and stays on your device. Use Rescan library to bring it back."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.forgetTrack(track)
+                    pendingDelete = null
+                }) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+/** Which picker sheet is open. */
+private enum class PickerKind { ALBUM, ARTIST }
+
+/** A small round button used while the app is in full-screen mode. */
+@Composable
+private fun SmallFloatingButton(
+    icon: ImageVector,
+    description: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(44.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .pointerInput(Unit) { detectTapGestures { onClick() } }
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(26.dp),
+            tint = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+/** A sheet that lists albums or artists so one can be chosen. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SelectionSheet(
+    title: String,
+    options: List<String>,
+    allLabel: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.padding(bottom = 24.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .semantics { heading() },
+            )
+            if (options.isEmpty()) {
+                Text(
+                    text = "Nothing to choose from yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                )
+            }
+            LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
+                item {
+                    SheetItem(allLabel) { onSelect("") }
+                }
+                items(items = options, key = { it }) { option ->
+                    SheetItem(option) { onSelect(option) }
+                }
+            }
+        }
+    }
 }
 
 /** Reads a StateFlow as Compose state. */
@@ -274,6 +427,8 @@ private fun TopBar(
     onToggleDetails: () -> Unit,
     onToggleSearch: () -> Unit,
     searchOpen: Boolean,
+    query: String,
+    onQueryChange: (String) -> Unit,
     onOpenMenu: () -> Unit,
 ) {
     TopAppBar(
@@ -282,32 +437,71 @@ private fun TopBar(
             titleContentColor = MaterialTheme.colorScheme.onSurface,
         ),
         title = {
-            Text(
-                text = "Music Player",
-                modifier = Modifier.semantics { heading() },
-            )
+            if (searchOpen) {
+                val focusRequester = remember { FocusRequester() }
+                val keyboard = LocalSoftwareKeyboardController.current
+
+                // Ask for focus and raise the keyboard as soon as search opens.
+                LaunchedEffect(Unit) {
+                    focusRequester.requestFocus()
+                    keyboard?.show()
+                }
+
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester)
+                        .semantics { contentDescription = "Search music and video" },
+                    singleLine = true,
+                    placeholder = { Text("Search music and video") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { onQueryChange("") }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                            }
+                        }
+                    },
+                )
+            } else {
+                Text(
+                    text = "Music Player",
+                    modifier = Modifier.semantics { heading() },
+                )
+            }
         },
         actions = {
-            // The declutter control, kept in the top right corner as requested.
-            IconButton(onClick = onToggleDetails) {
-                Icon(
-                    imageVector = if (detailsExpanded) Icons.Filled.KeyboardArrowUp
-                    else Icons.Filled.KeyboardArrowDown,
-                    contentDescription = if (detailsExpanded) "Hide extra controls"
-                    else "Show extra controls",
-                )
-            }
-            IconButton(onClick = onToggleSearch) {
-                Icon(
-                    imageVector = if (searchOpen) Icons.Filled.Close else Icons.Filled.Search,
-                    contentDescription = if (searchOpen) "Close search" else "Search",
-                )
-            }
-            IconButton(onClick = onOpenMenu) {
-                Icon(
-                    imageVector = Icons.Filled.MoreVert,
-                    contentDescription = "More options",
-                )
+            if (!searchOpen) {
+                // The declutter control: hides every extra panel for full screen.
+                IconButton(onClick = onToggleDetails) {
+                    Icon(
+                        imageVector = if (detailsExpanded) Icons.Filled.KeyboardArrowUp
+                        else Icons.Filled.KeyboardArrowDown,
+                        contentDescription = if (detailsExpanded) "Hide controls for full screen"
+                        else "Show controls",
+                    )
+                }
+                IconButton(onClick = onToggleSearch) {
+                    Icon(
+                        imageVector = Icons.Filled.Search,
+                        contentDescription = "Search",
+                    )
+                }
+                IconButton(onClick = onOpenMenu) {
+                    Icon(
+                        imageVector = Icons.Filled.MoreVert,
+                        contentDescription = "More options",
+                    )
+                }
+            } else {
+                IconButton(onClick = onToggleSearch) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Close search",
+                    )
+                }
             }
         },
     )
@@ -317,15 +511,12 @@ private fun TopBar(
 
 @Composable
 private fun DetailHeader(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    searchOpen: Boolean,
-    onCloseSearch: () -> Unit,
     filter: LibraryFilter,
+    album: String,
+    artist: String,
     onFilterChange: (LibraryFilter) -> Unit,
     trackCount: Int,
     scanning: Boolean,
-    favouritesOnly: Boolean,
 ) {
     Column(
         modifier = Modifier
@@ -334,24 +525,10 @@ private fun DetailHeader(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            placeholder = { Text("Search music and video") },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = { onQueryChange("") }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Clear search")
-                    }
-                }
-            },
-        )
-
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -365,7 +542,39 @@ private fun DetailHeader(
                 onClick = { onFilterChange(LibraryFilter.FAVOURITES) },
                 label = { Text("Favourites") },
                 leadingIcon = {
-                    Icon(Icons.Filled.Favorite, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(
+                        Icons.Filled.Favorite,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+            )
+            FilterChip(
+                selected = filter == LibraryFilter.ALBUMS,
+                onClick = { onFilterChange(LibraryFilter.ALBUMS) },
+                label = {
+                    Text(if (album.isBlank()) "Albums" else album, maxLines = 1)
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Filled.Album,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+            )
+            FilterChip(
+                selected = filter == LibraryFilter.ARTISTS,
+                onClick = { onFilterChange(LibraryFilter.ARTISTS) },
+                label = {
+                    Text(if (artist.isBlank()) "Artists" else artist, maxLines = 1)
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Filled.Person,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
                 },
             )
             FilterChip(
@@ -373,14 +582,17 @@ private fun DetailHeader(
                 onClick = { onFilterChange(LibraryFilter.VIDEOS) },
                 label = { Text("Video") },
                 leadingIcon = {
-                    Icon(Icons.Filled.Videocam, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(
+                        Icons.Filled.Videocam,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
                 },
             )
         }
 
         Text(
-            text = if (scanning) "Scanning device for music\u2026"
-            else "$trackCount items",
+            text = if (scanning) "Scanning device for music\u2026" else "$trackCount items",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
@@ -664,6 +876,7 @@ private fun TrackList(
     favourites: Set<String>,
     onPlay: (MediaTrack) -> Unit,
     onToggleFavourite: (MediaTrack) -> Unit,
+    onDelete: (MediaTrack) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -678,6 +891,7 @@ private fun TrackList(
                 isFavourite = favourites.contains(track.stableKey),
                 onPlay = { onPlay(track) },
                 onToggleFavourite = { onToggleFavourite(track) },
+                onDelete = { onDelete(track) },
             )
         }
         item { Spacer(modifier = Modifier.height(8.dp)) }
@@ -691,10 +905,12 @@ private fun TrackRow(
     isFavourite: Boolean,
     onPlay: () -> Unit,
     onToggleFavourite: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val spoken = buildString {
         append(track.title)
         if (track.artist.isNotBlank()) append(", by ").append(track.artist)
+        if (track.album.isNotBlank()) append(", from ").append(track.album)
         if (track.isVideo) append(", video")
         if (isFavourite) append(", favourite")
         if (isPlaying) append(", now playing")
@@ -714,7 +930,8 @@ private fun TrackRow(
                 customActions = listOf(
                     CustomAccessibilityAction(
                         if (isFavourite) "Remove from favourites" else "Add to favourites"
-                    ) { onToggleFavourite(); true }
+                    ) { onToggleFavourite(); true },
+                    CustomAccessibilityAction("Delete from the list") { onDelete(); true },
                 )
             },
     ) {
@@ -750,7 +967,7 @@ private fun TrackRow(
                     )
                 }
             }
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = formatTime(track.durationMs),
                 style = MaterialTheme.typography.labelLarge,
@@ -758,13 +975,23 @@ private fun TrackRow(
             )
             IconButton(
                 onClick = onToggleFavourite,
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier.size(44.dp),
             ) {
                 Icon(
                     imageVector = if (isFavourite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                    contentDescription = null,
+                    contentDescription = if (isFavourite) "Remove from favourites" else "Add to favourites",
                     tint = if (isFavourite) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(44.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.DeleteOutline,
+                    contentDescription = "Delete " + track.title + " from the list",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
