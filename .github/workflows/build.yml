@@ -58,6 +58,13 @@ jobs:
              artifacts/AccessibleMusicPlayer-release.apk
           ls -lh artifacts
 
+      - name: Print APK checksums
+        run: |
+          cd artifacts
+          sha256sum *.apk | tee SHA256SUMS.txt
+          echo "File sizes:"
+          stat -c '%n  %s bytes' *.apk
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:

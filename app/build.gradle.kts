@@ -26,6 +26,14 @@ android {
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
+
+            // Sign with every scheme the platform supports. v1 (JAR) helps
+            // older devices, v2 is the baseline, and v3 is what modern Android
+            // checks first. Signing with all three removes signing as a
+            // possible cause of an install failure on any device.
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 
