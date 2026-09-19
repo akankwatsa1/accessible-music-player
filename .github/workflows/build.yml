@@ -26,15 +26,15 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Generate debug signing keystore
+      - name: Check the signing keystore
         run: |
-          keytool -genkeypair -v \
-            -keystore app/debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA -keysize 2048 -validity 10950 \
-            -dname "CN=Accessible Music Player, OU=Mobile, O=akankwatsa1, L=Kampala, C=UG"
+          # A stable keystore is committed so every release is signed by the
+          # same key. That is what lets a newer APK install over an older one,
+          # and it avoids the stock debug certificate that some OEM ROMs refuse.
+          test -f app/release.keystore || { echo "app/release.keystore is missing"; exit 1; }
+          ls -l app/release.keystore
+          keytool -list -keystore app/release.keystore -storepass android -alias ampkey \
+            | grep -E "Alias name|Creation date|Certificate fingerprint"
 
       - name: Build debug and release APKs
         run: gradle assembleDebug assembleRelease --no-daemon --stacktrace
