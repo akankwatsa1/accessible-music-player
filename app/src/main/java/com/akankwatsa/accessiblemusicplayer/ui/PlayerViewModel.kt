@@ -9,6 +9,7 @@ import com.akankwatsa.accessiblemusicplayer.MusicPlayerApp
 import com.akankwatsa.accessiblemusicplayer.data.MediaTrack
 import com.akankwatsa.accessiblemusicplayer.data.PlayerSettings
 import com.akankwatsa.accessiblemusicplayer.playback.PlaybackController
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -62,6 +63,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val _selectedArtist = MutableStateFlow("")
     val selectedArtist: StateFlow<String> = _selectedArtist.asStateFlow()
 
+    /** The two text selections, combined so the pipeline stays within the
+     *  typed five-source combine overload. */
+    private val selectionPair: Flow<Pair<String, String>> =
+        combine(_selectedAlbum, _selectedArtist) { album, artist -> album to artist }
+
     private val _hasPermission = MutableStateFlow(false)
     val hasPermission: StateFlow<Boolean> = _hasPermission.asStateFlow()
 
@@ -80,11 +86,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         _allTracks,
         _searchQuery,
         _filter,
-        _selectedAlbum,
-        _selectedArtist,
+        selectionPair,
         settingsRepo.settings,
-    ) { all, query, mode, album, artist, prefs ->
-        filterTracks(all, query, mode, album, artist, prefs.favourites)
+    ) { all, query, mode, selection, prefs ->
+        filterTracks(all, query, mode, selection.first, selection.second, prefs.favourites)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val uiState: StateFlow<PlayerUiState> =
