@@ -16,19 +16,6 @@ android {
         versionName = "1.0.0"
         resourceConfigurations += listOf("en")
 
-        // Optional ABI restriction, used to build a slimmer test variant.
-        // A full build keeps every architecture so the APK runs on any phone.
-        val abiFilter = (project.findProperty("abiFilter") as String?)?.trim()
-        if (!abiFilter.isNullOrEmpty()) {
-            ndk {
-                abiFilters += abiFilter
-            }
-        }
-
-        val versionSuffix = (project.findProperty("versionSuffix") as String?)?.trim()
-        if (!versionSuffix.isNullOrEmpty()) {
-            versionNameSuffix = versionSuffix
-        }
     }
 
     // The release build is signed with the debug key so the APK can be
