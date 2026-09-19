@@ -22,9 +22,9 @@ android {
     // Replace this with a real signing config before publishing to Google Play.
     signingConfigs {
         create("shared") {
-            storeFile = file("debug.keystore")
+            storeFile = file("release.keystore")
             storePassword = "android"
-            keyAlias = "androiddebugkey"
+            keyAlias = "ampkey"
             keyPassword = "android"
 
             // Sign with every scheme the platform supports. v1 (JAR) helps
