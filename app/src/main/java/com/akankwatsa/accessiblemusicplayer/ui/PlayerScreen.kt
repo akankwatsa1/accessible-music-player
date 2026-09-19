@@ -23,12 +23,10 @@ import androidx.compose.material.icons.Icons
 
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowCompat
 import android.app.Activity
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.LocalActivity
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Album
@@ -133,7 +131,7 @@ import kotlinx.coroutines.launch
 fun PlayerScreen(viewModel: PlayerViewModel) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    val activity = LocalActivity.current
+    val activity = LocalContext.current as? Activity
 
     val uiState by viewModel.uiState.collectAsComposeState()
     val tracks by viewModel.visibleTracks.collectAsComposeState()
@@ -188,7 +186,10 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
     // Real full screen: hide the status and navigation bars while watching.
     DisposableEffect(fullscreenVideo) {
         val window = activity?.window
-        val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
+        // Fully qualified so this cannot depend on an import being present.
+        val controller = window?.let {
+            androidx.core.view.WindowCompat.getInsetsController(it, it.decorView)
+        }
         if (fullscreenVideo) {
             controller?.hide(WindowInsetsCompat.Type.systemBars())
             controller?.systemBarsBehavior =
