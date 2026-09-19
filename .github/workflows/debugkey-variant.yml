@@ -27,6 +27,7 @@ jobs:
         run: |
           # Same identity as the standard Android debug certificate, which is
           # the key the working APK on this phone was signed with.
+          rm -f app/release.keystore
           keytool -genkeypair -v \
             -keystore app/release.keystore \
             -storetype PKCS12 \
