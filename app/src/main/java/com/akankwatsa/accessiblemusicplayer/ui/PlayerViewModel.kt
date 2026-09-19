@@ -73,6 +73,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     private var _lastScanAt = 0L
 
+    /** Set when the user asks for a permanent delete; the activity launches it. */
+    private val _deleteRequest = MutableStateFlow<android.content.IntentSender?>(null)
+    val deleteRequest: StateFlow<android.content.IntentSender?> = _deleteRequest.asStateFlow()
+
     private val _snackbar = MutableStateFlow<String?>(null)
     val snackbar: StateFlow<String?> = _snackbar.asStateFlow()
 
@@ -198,6 +202,58 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun selectArtist(artist: String) {
         _selectedArtist.value = artist
         _filter.value = LibraryFilter.ARTISTS
+    }
+
+    /**
+     * Asks Android to delete these files from the device for good. The system
+     * shows its own confirmation dialog first, and the result comes back
+     * through [onDeleteFinished].
+     */
+    fun requestPermanentDelete(tracks: List<MediaTrack>) {
+        if (tracks.isEmpty()) return
+        val sender = library.buildDeleteRequest(tracks)
+        if (sender == null) {
+            _snackbar.value = "Permanent delete is not available on this device."
+            return
+        }
+        _deleteRequest.value = sender
+    }
+
+    /** Called once the activity has launched the request. */
+    fun clearDeleteRequest() {
+        _deleteRequest.value = null
+    }
+
+    /** Called with the outcome of the system delete dialog. */
+    fun onDeleteFinished(success: Boolean) {
+        if (success) {
+            _snackbar.value = "Deleted from the device."
+            rescan()
+        } else {
+            _snackbar.value = "Nothing was deleted."
+        }
+    }
+
+    /** Every track belonging to [album], used by the album long-press actions. */
+    fun tracksOfAlbum(album: String): List<MediaTrack> =
+        _allTracks.value.filter { it.album.equals(album, ignoreCase = true) }
+
+    /** Every track belonging to [artist], used by the artist long-press actions. */
+    fun tracksOfArtist(artist: String): List<MediaTrack> =
+        _allTracks.value.filter { it.artist.equals(artist, ignoreCase = true) }
+
+    /** Drops a whole album from the list without touching the device. */
+    fun forgetAlbum(album: String) {
+        val gone = tracksOfAlbum(album).map { it.stableKey }.toSet()
+        _allTracks.value = _allTracks.value.filterNot { it.stableKey in gone }
+        _snackbar.value = "Removed " + gone.size + " items from the list"
+    }
+
+    /** Drops a whole artist from the list without touching the device. */
+    fun forgetArtist(artist: String) {
+        val gone = tracksOfArtist(artist).map { it.stableKey }.toSet()
+        _allTracks.value = _allTracks.value.filterNot { it.stableKey in gone }
+        _snackbar.value = "Removed " + gone.size + " items from the list"
     }
 
     /**

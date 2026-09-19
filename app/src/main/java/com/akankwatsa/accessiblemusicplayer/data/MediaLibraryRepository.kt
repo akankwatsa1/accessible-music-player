@@ -33,6 +33,22 @@ class MediaLibraryRepository(private val context: Context) {
         tracks
     }
 
+    /**
+     * Builds a request to delete [tracks] from the device for good.
+     *
+     * Android will show its own confirmation dialog before anything is
+     * removed, which is why this returns a PendingIntent for the activity to
+     * launch instead of deleting directly.
+     */
+    fun buildDeleteRequest(tracks: List<MediaTrack>): android.content.IntentSender? {
+        if (tracks.isEmpty()) return null
+        val uris = tracks.map { it.uri }
+        return runCatching {
+            android.provider.MediaStore.createDeleteRequest(context.contentResolver, uris)
+                .intentSender
+        }.getOrNull()
+    }
+
     private fun queryAudio(): List<MediaTrack> {
         val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)

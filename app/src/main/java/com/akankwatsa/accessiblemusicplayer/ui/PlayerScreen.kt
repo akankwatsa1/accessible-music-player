@@ -1,5 +1,6 @@
 package com.akankwatsa.accessiblemusicplayer.ui
 
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,11 +21,21 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowCompat
+import android.app.Activity
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.LocalActivity
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -122,6 +133,7 @@ import kotlinx.coroutines.launch
 fun PlayerScreen(viewModel: PlayerViewModel) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val activity = LocalActivity.current
 
     val uiState by viewModel.uiState.collectAsComposeState()
     val tracks by viewModel.visibleTracks.collectAsComposeState()
@@ -139,7 +151,8 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
     var settingsOpen by remember { mutableStateOf(false) }
     var helpOpen by remember { mutableStateOf(false) }
     var picker by remember { mutableStateOf<PickerKind?>(null) }
-    var pendingDelete by remember { mutableStateOf<MediaTrack?>(null) }
+    var pendingDelete by remember { mutableStateOf<LongPressTarget?>(null) }
+    var fullscreenVideo by remember { mutableStateOf(false) }
 
     // Surface service messages (for example a playback error) as a snackbar.
     DisposableEffect(Unit) {
@@ -156,10 +169,70 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
         }
     }
 
+    // Hand the permanent-delete request to Android, which confirms with the user.
+    val deleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        viewModel.onDeleteFinished(result.resultCode == Activity.RESULT_OK)
+        viewModel.clearDeleteRequest()
+    }
+
+    val deleteRequest by viewModel.deleteRequest.collectAsComposeState()
+    LaunchedEffect(deleteRequest) {
+        deleteRequest?.let { sender ->
+            runCatching { deleteLauncher.launch(IntentSenderRequest.Builder(sender).build()) }
+                .onFailure { viewModel.clearDeleteRequest() }
+        }
+    }
+
+    // Real full screen: hide the status and navigation bars while watching.
+    DisposableEffect(fullscreenVideo) {
+        val window = activity?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
+        if (fullscreenVideo) {
+            controller?.hide(WindowInsetsCompat.Type.systemBars())
+            controller?.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            controller?.show(WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose { }
+    }
+
+    // ------------------------------------------------------------ full screen
+    // Watching a video full screen shows the video and the transport controls
+    // only: no app bar, no library list and no system bars.
+    if (fullscreenVideo && playback.isVideo) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            VideoSurface(
+                zoomFill = settings.zoomFill,
+                onToggleZoom = { viewModel.setZoomFill(!settings.zoomFill) },
+            )
+            TransportBar(
+                playback = playback,
+                onPrevious = { PlaybackController.previous() },
+                onSkipBack = { viewModel.skipBack() },
+                onPlayPause = { PlaybackController.togglePlayPause() },
+                onSkipForward = { viewModel.skipForward() },
+                onNext = { PlaybackController.next() },
+                onSeek = { viewModel.seekTo(it) },
+                onToggleShuffle = { viewModel.toggleShuffle() },
+                onCycleRepeat = { viewModel.cycleRepeat() },
+                onToggleFullscreen = { fullscreenVideo = false },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+        return
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        // In full-screen mode the bar disappears entirely so the list and the
-        // video get the whole screen.
+        // The bar disappears entirely when the controls are hidden, so the list
+        // and the video get the whole screen.
         topBar = {
             if (searchOpen) {
                 TopBar(
@@ -197,6 +270,11 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
                 onSeek = { viewModel.seekTo(it) },
                 onToggleShuffle = { viewModel.toggleShuffle() },
                 onCycleRepeat = { viewModel.cycleRepeat() },
+                onToggleFullscreen = if (playback.isVideo) {
+                    { fullscreenVideo = true }
+                } else {
+                    null
+                },
             )
         },
     ) { padding ->
@@ -218,6 +296,19 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
                                 else -> viewModel.setFilter(mode)
                             }
                         },
+                        onLongPress = { mode ->
+                            when (mode) {
+                                LibraryFilter.ALBUMS ->
+                                    if (selectedAlbum.isNotBlank()) {
+                                        pendingDelete = LongPressTarget.Album(selectedAlbum)
+                                    }
+                                LibraryFilter.ARTISTS ->
+                                    if (selectedArtist.isNotBlank()) {
+                                        pendingDelete = LongPressTarget.Artist(selectedArtist)
+                                    }
+                                else -> Unit
+                            }
+                        },
                         trackCount = tracks.size,
                         scanning = scanning,
                     )
@@ -230,7 +321,6 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
                     )
                 }
 
-                // Body: permission prompt, scan progress, empty state, or the list.
                 when (uiState) {
                     PlayerUiState.NeedsPermission -> PermissionRequest(
                         onGrant = { viewModel.onPermissionResult(true) },
@@ -254,14 +344,13 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
                                 favourites = settings.favourites,
                                 onPlay = viewModel::play,
                                 onToggleFavourite = viewModel::toggleFavourite,
-                                onDelete = { pendingDelete = it },
+                                onLongPress = { pendingDelete = LongPressTarget.Track(it) },
                             )
                         }
                     }
                 }
             }
 
-            // A single always-available control for getting back the full UI.
             if (!settings.detailsExpanded) {
                 SmallFloatingButton(
                     icon = Icons.Filled.KeyboardArrowDown,
@@ -322,32 +411,85 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
         )
     }
 
-    pendingDelete?.let { track ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("Remove from the list?") },
-            text = {
-                Text(
-                    track.title +
-                        " will be removed from this app's list. The file itself is not " +
-                        "deleted and stays on your device. Use Rescan library to bring it back."
-                )
+    pendingDelete?.let { target ->
+        ActionDialog(
+            target = target,
+            albumCount = if (target is LongPressTarget.Album) {
+                viewModel.tracksOfAlbum(target.name).size
+            } else {
+                0
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.forgetTrack(track)
-                    pendingDelete = null
-                }) { Text("Remove") }
+            artistCount = if (target is LongPressTarget.Artist) {
+                viewModel.tracksOfArtist(target.name).size
+            } else {
+                0
             },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+            onRemoveFromList = {
+                when (target) {
+                    is LongPressTarget.Track -> viewModel.forgetTrack(target.track)
+                    is LongPressTarget.Album -> viewModel.forgetAlbum(target.name)
+                    is LongPressTarget.Artist -> viewModel.forgetArtist(target.name)
+                }
+                pendingDelete = null
             },
+            onDeleteFromDevice = {
+                val victims = when (target) {
+                    is LongPressTarget.Track -> listOf(target.track)
+                    is LongPressTarget.Album -> viewModel.tracksOfAlbum(target.name)
+                    is LongPressTarget.Artist -> viewModel.tracksOfArtist(target.name)
+                }
+                viewModel.requestPermanentDelete(victims)
+                pendingDelete = null
+            },
+            onDismiss = { pendingDelete = null },
         )
     }
 }
 
+/** What a long press was aimed at. */
+private sealed interface LongPressTarget {
+    data class Track(val track: MediaTrack) : LongPressTarget
+    data class Album(val name: String) : LongPressTarget
+    data class Artist(val name: String) : LongPressTarget
+}
+
 /** Which picker sheet is open. */
 private enum class PickerKind { ALBUM, ARTIST }
+
+/** Offers a non-destructive and a permanent way to get rid of a selection. */
+@Composable
+private fun ActionDialog(
+    target: LongPressTarget,
+    albumCount: Int,
+    artistCount: Int,
+    onRemoveFromList: () -> Unit,
+    onDeleteFromDevice: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val what = when (target) {
+        is LongPressTarget.Track -> target.track.title
+        is LongPressTarget.Album -> "the album " + target.name + " (" + albumCount + " items)"
+        is LongPressTarget.Artist -> "everything by " + target.name + " (" + artistCount + " items)"
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("What should happen to " + what + "?") },
+        text = {
+            Text(
+                "Remove from the list hides it here and nothing is lost - use Rescan " +
+                    "library to bring it back.\n\nDelete from this device erases the " +
+                    "file for good. Android will ask you to confirm."
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onRemoveFromList) { Text("Remove from list") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDeleteFromDevice) { Text("Delete from device") }
+        },
+    )
+}
 
 /** A small round button used while the app is in full-screen mode. */
 @Composable
@@ -403,9 +545,7 @@ private fun SelectionSheet(
                 )
             }
             LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
-                item {
-                    SheetItem(allLabel) { onSelect("") }
-                }
+                item { SheetItem(allLabel) { onSelect("") } }
                 items(items = options, key = { it }) { option ->
                     SheetItem(option) { onSelect(option) }
                 }
@@ -516,6 +656,7 @@ private fun DetailHeader(
     album: String,
     artist: String,
     onFilterChange: (LibraryFilter) -> Unit,
+    onLongPress: (LibraryFilter) -> Unit,
     trackCount: Int,
     scanning: Boolean,
 ) {
@@ -654,8 +795,11 @@ private fun TransportBar(
     onSeek: (Long) -> Unit,
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
+    onToggleFullscreen: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
+        modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 3.dp,
     ) {
@@ -732,6 +876,20 @@ private fun TransportBar(
                             MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                if (onToggleFullscreen != null) {
+                    IconButton(onClick = onToggleFullscreen) {
+                        Icon(
+                            imageVector = if (playback.isVideo) Icons.Filled.Fullscreen
+                            else Icons.Filled.FullscreenExit,
+                            contentDescription = if (playback.isVideo) {
+                                "Watch full screen"
+                            } else {
+                                "Leave full screen"
+                            },
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
                 }
             }
         }
@@ -877,7 +1035,7 @@ private fun TrackList(
     favourites: Set<String>,
     onPlay: (MediaTrack) -> Unit,
     onToggleFavourite: (MediaTrack) -> Unit,
-    onDelete: (MediaTrack) -> Unit,
+    onLongPress: (MediaTrack) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -892,7 +1050,7 @@ private fun TrackList(
                 isFavourite = favourites.contains(track.stableKey),
                 onPlay = { onPlay(track) },
                 onToggleFavourite = { onToggleFavourite(track) },
-                onDelete = { onDelete(track) },
+                onLongPress = { onLongPress(track) },
             )
         }
         item { Spacer(modifier = Modifier.height(8.dp)) }
@@ -906,7 +1064,7 @@ private fun TrackRow(
     isFavourite: Boolean,
     onPlay: () -> Unit,
     onToggleFavourite: () -> Unit,
-    onDelete: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     val spoken = buildString {
         append(track.title)
@@ -932,7 +1090,7 @@ private fun TrackRow(
                     CustomAccessibilityAction(
                         if (isFavourite) "Remove from favourites" else "Add to favourites"
                     ) { onToggleFavourite(); true },
-                    CustomAccessibilityAction("Delete from the list") { onDelete(); true },
+                    CustomAccessibilityAction("Remove or delete this track") { onLongPress(); true },
                 )
             },
     ) {
@@ -986,12 +1144,12 @@ private fun TrackRow(
                 )
             }
             IconButton(
-                onClick = onDelete,
+                onClick = onLongPress,
                 modifier = Modifier.size(44.dp),
             ) {
                 Icon(
                     imageVector = Icons.Filled.DeleteOutline,
-                    contentDescription = "Delete " + track.title + " from the list",
+                    contentDescription = "Remove or delete " + track.title,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
